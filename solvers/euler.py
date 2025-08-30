@@ -1,14 +1,16 @@
-import torch
-from .scheduler import CTScheduler
+# euler.py
+# -*- coding: utf-8 -*-
+# Euler (DDIM η=0) — uses CTScheduler from dit.py
 
-# ==================== EulerSolver (DDIM η=0) ====================
+import torch
+
 class EulerSolver:
     """x0=(x−σ ε)/α ;  x' = α' x0 + σ' ε."""
     def __init__(self, eps: float = 1e-12):
         self.eps = float(eps)
 
     @torch.no_grad()
-    def sample(self, scheduler: CTScheduler, latents: torch.Tensor, mode: str = "noise") -> torch.Tensor:
+    def sample(self, scheduler, latents: torch.Tensor, mode: str = "noise") -> torch.Tensor:
         x = latents
         a, s = scheduler.alphas, scheduler.sigmas
         for i in range(scheduler.S - 1):

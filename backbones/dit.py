@@ -1,5 +1,8 @@
-# backbones/dit.py
+# dit.py
 # -*- coding: utf-8 -*-
+# DiT backbone + CTScheduler (from DiTPipeline only)
+
+import numpy as np
 import torch
 import torch.nn as nn
 from diffusers import DiTPipeline
@@ -7,12 +10,12 @@ from ..solvers.scheduler import CTScheduler
 
 class DiT(nn.Module):
     """
-    Minimal DiT backbone for your runner:
+    Minimal DiT backbone for the runner:
       - __init__(dtype, model_id)
-      - get_scheduler(labels, steps, cfg, null_id)  -> CTScheduler (see solvers/ct_scheduler.py)
+      - get_scheduler(labels, steps, cfg, null_id)  -> CTScheduler
       - get_noise(seeds)                            -> [B,4,32,32]
-      - decode_vae(latents, raw_output, pil_output)-> dict
-      - get_label_ids(text_list)                    -> ImageNet class ids (optional)
+      - decode_vae(latents, raw_output, pil_output) -> dict
+      - attributes: device, C, S, pipe
     """
     def __init__(self, dtype: torch.dtype = torch.bfloat16, model_id: str | None = None):
         super().__init__()
@@ -21,21 +24,14 @@ class DiT(nn.Module):
         self.pipe = DiTPipeline.from_pretrained(mid, torch_dtype=dtype).to(self.device)
         self.pipe.vae.enable_slicing()
         self.dtype = dtype
-
-        # latent spec
         self.C = int(self.pipe.transformer.config.in_channels)   # 4
         self.S = int(self.pipe.transformer.config.sample_size)   # 32 (for 256x256)
 
-    # --------- Scheduler (CTScheduler) ----------
-    def get_scheduler(self, labels, steps: int = 10, cfg: float = 4.0, null_id: int = 1000):
-        """
-        labels: Tensor[List[int]] (B,)  or list[int] / list[str] (text → id 매핑 필요 시 get_label_ids 사용)
-        """
+    def get_scheduler(self, labels, steps: int = 10, cfg: float = 4.0, null_id: int = 1000) -> CTScheduler:
         if not torch.is_tensor(labels):
             labels = torch.as_tensor(labels, device=self.device, dtype=torch.long)
         return CTScheduler(self.pipe, labels.to(self.device), steps=steps, cfg=cfg, null_id=null_id, dtype=self.dtype)
 
-    # --------- Noise (deterministic per seed) ----------
     @torch.no_grad()
     def get_noise(self, seeds):
         B = len(seeds)
@@ -45,7 +41,6 @@ class DiT(nn.Module):
             x[i] = torch.randn((self.C, self.S, self.S), generator=g, device=self.device, dtype=self.dtype)
         return x
 
-    # --------- Decode VAE ----------
     @torch.no_grad()
     def decode_vae(self, latents: torch.Tensor, raw_output: bool = True, pil_output: bool = True):
         imgs = self.pipe.vae.decode(latents / self.pipe.vae.config.scaling_factor).sample  # [-1,1], [B,3,H,W]
@@ -57,8 +52,3 @@ class DiT(nn.Module):
             from PIL import Image
             out["pil_output"] = [Image.fromarray(a, mode="RGB") for a in arr]
         return out
-
-    # --------- Optional: text → ImageNet ids ----------
-    def get_label_ids(self, text_list):
-        # diffusers DiTPipeline가 제공 (ImageNet class name → id)
-        return self.pipe.get_label_ids(text_list)
